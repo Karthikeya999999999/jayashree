@@ -521,22 +521,73 @@ function handleDistrictSelectionChange(selectedDistrict, selectedState) {
   updateLogisticsDisplay(pinVal, selectedState);
 }
 
+function parseRangeDays(rangeStr) {
+  if (!rangeStr) return { min: 2, max: 4 };
+  const match = String(rangeStr).match(/(\d+)\s*[-–—]\s*(\d+)/);
+  if (match) {
+    return { min: parseInt(match[1], 10), max: parseInt(match[2], 10) };
+  }
+  const single = String(rangeStr).match(/(\d+)/);
+  if (single) {
+    const n = parseInt(single[1], 10);
+    return { min: n, max: n + 2 };
+  }
+  return { min: 2, max: 4 };
+}
+
+function formatDynamicDeliveryDateRange(pinCode, stateName, orderDate = new Date()) {
+  const info = locationService.getDeliveryInfo(pinCode, { stateName });
+  const basePrepDays = 7; // standard designer tailoring window
+
+  let minDays = 2;
+  let maxDays = 4;
+
+  if (info && info.recommendedDeliveryRange) {
+    const parsed = parseRangeDays(info.recommendedDeliveryRange);
+    minDays = parsed.min;
+    maxDays = parsed.max;
+  }
+
+  const startDate = new Date(orderDate);
+  startDate.setDate(startDate.getDate() + basePrepDays + minDays);
+
+  const endDate = new Date(orderDate);
+  endDate.setDate(endDate.getDate() + basePrepDays + maxDays);
+
+  const MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const startDay = startDate.getDate();
+  const endDay = endDate.getDate();
+  const startMonth = MONTHS[startDate.getMonth()];
+  const endMonth = MONTHS[endDate.getMonth()];
+  const startYear = startDate.getFullYear();
+  const endYear = endDate.getFullYear();
+
+  if (startYear === endYear) {
+    if (startMonth === endMonth) {
+      return `${startDay}–${endDay} ${startMonth} ${startYear}`;
+    }
+    return `${startDay} ${startMonth} – ${endDay} ${endMonth} ${startYear}`;
+  }
+  return `${startDay} ${startMonth} ${startYear} – ${endDay} ${endMonth} ${endYear}`;
+}
+
 /**
- * Updates logistics card route and delivery metrics from location structure
+ * Updates logistics card to display only the dynamic estimated delivery date
  */
 function updateLogisticsDisplay(pinCode, stateName) {
   const logisticsCard = document.getElementById('checkoutLogisticsCard');
-  const logisticsDist = document.getElementById('logisticsDistance');
-  const logisticsTransit = document.getElementById('logisticsTransit');
-  const logisticsRange = document.getElementById('logisticsRange');
+  const logisticsDate = document.getElementById('logisticsDeliveryDate');
 
   if (!logisticsCard) return;
 
   const info = locationService.getDeliveryInfo(pinCode, { stateName });
   if (info && (pinCode || stateName)) {
-    if (logisticsDist) logisticsDist.textContent = info.distanceEstimate;
-    if (logisticsTransit) logisticsTransit.textContent = `Transit: ${info.estimatedTransitDays}`;
-    if (logisticsRange) logisticsRange.textContent = info.recommendedDeliveryRange;
+    const formattedDateRange = formatDynamicDeliveryDateRange(pinCode, stateName);
+    if (logisticsDate) logisticsDate.textContent = formattedDateRange;
     logisticsCard.style.display = 'flex';
   } else {
     logisticsCard.style.display = 'none';
@@ -558,12 +609,10 @@ function formatPrice(price) {
 }
 
 /**
- * Returns estimated delivery timeline.
- * Structure queries dedicated locationService delivery matrix.
+ * Returns dynamically calculated estimated delivery date range based on location.
  */
-function getEstimatedDelivery(pinCode, state) {
-  const deliveryInfo = locationService.getDeliveryInfo(pinCode, { stateName: state });
-  return deliveryInfo?.standardTailoringTimeline || ESTIMATED_DELIVERY_TIMELINE;
+function getEstimatedDelivery(pinCode, state, orderDate = new Date()) {
+  return formatDynamicDeliveryDateRange(pinCode, state, orderDate);
 }
 
 /**
@@ -647,7 +696,7 @@ function openCheckoutModal(purchase) {
   const emailInput = document.getElementById('deliveryEmail');
   if (emailInput) {
     const session = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
-    if (session && session.email) {
+    if (session && session.email && session.provider !== 'guest') {
       emailInput.value = session.email;
     }
   }
@@ -670,7 +719,12 @@ function closeCheckoutModal() {
   const overlay = document.getElementById('checkoutModalOverlay');
   if (overlay) overlay.classList.remove('open');
   document.body.classList.remove('popup-open');
+  document.body.style.paddingRight = '';
   currentCheckoutPurchase = null;
+  pendingOrderCheckout = null;
+  try {
+    sessionStorage.removeItem('pendingOrderCheckout');
+  } catch (e) {}
 }
 
 function updateCheckoutSummaryFields() {
@@ -703,7 +757,7 @@ function updateCheckoutSummaryFields() {
       if (sumSize) sumSize.textContent = currentCheckoutPurchase.size || 'Standard';
       if (sumPrice) sumPrice.textContent = formatPrice(currentCheckoutPurchase.price);
     }
-    if (sumEst) sumEst.textContent = getEstimatedDelivery();
+    if (sumEst) sumEst.textContent = getEstimatedDelivery(pinVal, stateVal);
 
     if (sumAddr) {
       const parts = [];
@@ -793,15 +847,127 @@ function processPaymentSimulation(orderPayload, onSuccess, onError) {
   }, 700);
 }
 
-function handleCheckoutSubmit(e) {
-  if (e) e.preventDefault();
-  if (!validateCheckoutForm()) return;
+let pendingOrderCheckout = null;
+
+function getSavedPendingPurchase() {
+  try {
+    const raw = sessionStorage.getItem('pendingPurchase');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getSavedPendingOrder() {
+  try {
+    const raw = sessionStorage.getItem('pendingOrderCheckout');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function restorePendingOrderDetails(order, authEmail) {
+  if (!order) return;
+  if (order.purchase) {
+    currentCheckoutPurchase = order.purchase;
+    const badgeName = document.getElementById('badgeProductName');
+    const badgeSize = document.getElementById('badgeProductSize');
+    const badgePrice = document.getElementById('badgeProductPrice');
+    if (badgeName) badgeName.textContent = order.purchase.design || 'Designer Outfit';
+    if (badgeSize) badgeSize.textContent = order.purchase.size || 'Standard';
+    if (badgePrice) badgePrice.textContent = formatPrice(order.purchase.price);
+  }
+
+  const stateSelect = document.getElementById('deliveryState');
+  const distSelect = document.getElementById('deliveryDistrict');
+  const cityInput = document.getElementById('deliveryCity');
+  const areaInput = document.getElementById('deliveryArea');
+  const pinInput = document.getElementById('deliveryPin');
+  const addrInput = document.getElementById('deliveryAddress');
+  const emailInput = document.getElementById('deliveryEmail');
+
+  if (stateSelect && order.state) {
+    stateSelect.value = order.state;
+    handleStateSelectionChange(order.state);
+  }
+  if (distSelect && order.district) {
+    distSelect.value = order.district;
+    distSelect.disabled = false;
+  }
+  if (cityInput && order.city) cityInput.value = order.city;
+  if (areaInput && order.area) areaInput.value = order.area;
+  if (pinInput && order.pinCode) {
+    pinInput.value = order.pinCode;
+    const stateVal = order.state || '';
+    updateLogisticsDisplay(order.pinCode, stateVal);
+  }
+  if (addrInput && order.fullAddress) addrInput.value = order.fullAddress;
+
+  const effectiveEmail = authEmail || order.email || '';
+  if (emailInput && effectiveEmail) emailInput.value = effectiveEmail;
+  if (order && effectiveEmail) order.email = effectiveEmail;
+
+  updateCheckoutSummaryFields();
+}
+
+function executeOrderPayment(orderPayload) {
+  if (!orderPayload) return;
+
+  const overlay = document.getElementById('checkoutModalOverlay');
+  const deliveryView = document.getElementById('checkoutDeliveryView');
+  const successView = document.getElementById('checkoutSuccessView');
+
+  if (overlay && !overlay.classList.contains('open')) {
+    overlay.classList.add('open');
+    document.body.classList.add('popup-open');
+  }
+  if (deliveryView) deliveryView.style.display = 'block';
+  if (successView) successView.style.display = 'none';
 
   const submitBtn = document.getElementById('checkoutSubmitBtn');
   if (submitBtn) {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span>Processing payment...</span>';
   }
+
+  processPaymentSimulation(orderPayload, (paymentResponse) => {
+    // Show Payment Success View
+    if (deliveryView) deliveryView.style.display = 'none';
+    if (successView) successView.style.display = 'block';
+
+    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+    const orderIdEl = document.getElementById('confirmOrderId');
+    const productEl = document.getElementById('confirmProduct');
+    const sizeEl = document.getElementById('confirmSize');
+    const amountEl = document.getElementById('confirmAmount');
+    const addrEl = document.getElementById('confirmAddress');
+    const emailEl = document.getElementById('confirmEmailDisplay');
+
+    const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+    const finalEmail = customer?.email || orderPayload.email || '';
+
+    if (orderIdEl) orderIdEl.textContent = `#JF-${randomSuffix}`;
+    if (productEl) productEl.textContent = orderPayload.purchase?.design || 'Designer Outfit';
+    if (sizeEl) sizeEl.textContent = orderPayload.purchase?.size || 'Standard';
+    if (amountEl) amountEl.textContent = formatPrice(orderPayload.purchase?.price);
+    if (addrEl) addrEl.textContent = orderPayload.formattedAddress;
+    if (emailEl) emailEl.textContent = finalEmail;
+    const confirmEstimateEl = document.getElementById('confirmEstimate');
+    if (confirmEstimateEl && orderPayload.estimatedDelivery) {
+      confirmEstimateEl.textContent = orderPayload.estimatedDelivery;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>Buy Now</span>';
+    }
+  });
+}
+
+function handleCheckoutSubmit(e) {
+  if (e) e.preventDefault();
+  if (!validateCheckoutForm()) return;
 
   const stateVal = document.getElementById('deliveryState')?.value.trim() || '';
   const distVal = document.getElementById('deliveryDistrict')?.value.trim() || '';
@@ -834,43 +1000,25 @@ function handleCheckoutSubmit(e) {
     estimatedDelivery: getEstimatedDelivery(pinVal, stateVal)
   };
 
-  processPaymentSimulation(orderPayload, (paymentResponse) => {
-    // Show Payment Success View
-    const deliveryView = document.getElementById('checkoutDeliveryView');
-    const successView = document.getElementById('checkoutSuccessView');
-    if (deliveryView) deliveryView.style.display = 'none';
-    if (successView) successView.style.display = 'block';
+  // Requirement: Before completing a purchase, the customer must be logged in.
+  // Flow: View & Buy -> Select Size -> Delivery Details -> Buy Now -> Login/Sign Up -> Payment.
+  // If already logged in, continue directly to payment.
+  if (!isCustomerLoggedIn()) {
+    pendingOrderCheckout = orderPayload;
+    try {
+      sessionStorage.setItem('pendingOrderCheckout', JSON.stringify(orderPayload));
+    } catch (err) {}
 
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const orderIdEl = document.getElementById('confirmOrderId');
-    const productEl = document.getElementById('confirmProduct');
-    const sizeEl = document.getElementById('confirmSize');
-    const amountEl = document.getElementById('confirmAmount');
-    const addrEl = document.getElementById('confirmAddress');
-    const emailEl = document.getElementById('confirmEmailDisplay');
-
-    if (orderIdEl) orderIdEl.textContent = `#JF-${randomSuffix}`;
-    if (productEl) productEl.textContent = currentCheckoutPurchase?.design || 'Designer Outfit';
-    if (sizeEl) sizeEl.textContent = currentCheckoutPurchase?.size || 'Standard';
-    if (amountEl) amountEl.textContent = formatPrice(currentCheckoutPurchase?.price);
-    if (addrEl) addrEl.textContent = formattedAddress;
-    if (emailEl) emailEl.textContent = emailVal;
-
-    // Set customer session email if not set
-    const session = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
-    if (!session && typeof setCustomerSession === 'function') {
-      setCustomerSession({
-        email: emailVal,
-        name: emailVal.split('@')[0],
-        provider: 'guest'
-      });
+    // Open login/sign-up screen while preserving all entered delivery details
+    openAuthModal('login', true);
+    if (authEmailInput && emailVal) {
+      authEmailInput.value = emailVal;
     }
+    return;
+  }
 
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = '<span>Buy Now</span>';
-    }
-  });
+  // Already logged in: continue directly to payment
+  executeOrderPayment(orderPayload);
 }
 
 function executeCheckout(purchase) {
@@ -909,6 +1057,14 @@ function handleBuyNow(cardId) {
     sessionStorage.setItem('pendingPurchase', JSON.stringify(pendingPurchase));
   } catch (e) {}
 
+  // Flow: View & Buy -> Select Size -> Buy Now -> Login / Sign Up -> Delivery Details -> Payment
+  // 1. If NOT logged in -> show the existing Login / Sign Up page first
+  if (!isCustomerLoggedIn()) {
+    openAuthModal('login', true);
+    return;
+  }
+
+  // 4. If the customer is already logged in -> skip Login and open Delivery Details directly
   openCheckoutModal(pendingPurchase);
 }
 
@@ -1752,6 +1908,11 @@ function getCustomerSession() {
   }
 }
 
+function isCustomerLoggedIn() {
+  const session = getCustomerSession();
+  return Boolean(session && session.email && session.provider !== 'guest');
+}
+
 function setCustomerSession(customer) {
   try {
     localStorage.setItem('jayashree_customer', JSON.stringify(customer));
@@ -1830,11 +1991,12 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
   if (fromBuyNow) {
     if (authFormView) authFormView.style.display = 'block';
     if (authUserView) authUserView.style.display = 'none';
-    if (authEmailInput && customer && customer.email) {
-      authEmailInput.value = customer.email;
+    const prefillEmail = pendingOrderCheckout?.email || (customer && customer.email) || '';
+    if (authEmailInput && prefillEmail) {
+      authEmailInput.value = prefillEmail;
     }
   } else {
-    if (customer && customer.email) {
+    if (customer && customer.email && customer.provider !== 'guest') {
       if (authFormView) authFormView.style.display = 'none';
       if (authUserView) authUserView.style.display = 'block';
     } else {
@@ -1856,11 +2018,19 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
 function closeAuthModal() {
   if (!authModalOverlay) return;
   authModalOverlay.classList.remove('open');
-  document.body.classList.remove('popup-open');
-  document.body.style.paddingRight = '';
+  const checkoutOverlay = document.getElementById('checkoutModalOverlay');
+  if (!checkoutOverlay || !checkoutOverlay.classList.contains('open')) {
+    document.body.classList.remove('popup-open');
+    document.body.style.paddingRight = '';
+  }
   const { path } = parseHash();
   if (path === '/login' || path === '/signup' || path === '/auth') {
     window.location.hash = '#/';
+  }
+  const submitBtn = document.getElementById('checkoutSubmitBtn');
+  if (submitBtn && !submitBtn.disabled) {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<span>Buy Now</span>';
   }
 }
 
@@ -1926,14 +2096,23 @@ authSocialBtns.forEach(btn => {
 
     setCustomerSession({ email, name, provider });
 
-    const currentPending = pendingPurchase;
+    const currentPendingPurchase = pendingPurchase || getSavedPendingPurchase();
+    const currentPendingOrder = pendingOrderCheckout || getSavedPendingOrder();
     pendingPurchase = null;
-    try { sessionStorage.removeItem('pendingPurchase'); } catch (e) {}
+    pendingOrderCheckout = null;
+    try {
+      sessionStorage.removeItem('pendingPurchase');
+      sessionStorage.removeItem('pendingOrderCheckout');
+    } catch (e) {}
 
     setTimeout(() => {
       closeAuthModal();
-      if (currentPending) {
-        executeCheckout(currentPending);
+      if (currentPendingPurchase) {
+        // Automatically continue to the Delivery Details screen with preserved product, size & price
+        openCheckoutModal(currentPendingPurchase);
+      } else if (currentPendingOrder) {
+        restorePendingOrderDetails(currentPendingOrder, email);
+        executeOrderPayment(currentPendingOrder);
       }
     }, 700);
   });
@@ -1971,14 +2150,23 @@ if (authEmailForm) {
         authSubmitBtn.textContent = currentAuthMode === 'signup' ? 'Sign Up' : 'Login';
       }
 
-      const currentPending = pendingPurchase;
+      const currentPendingPurchase = pendingPurchase || getSavedPendingPurchase();
+      const currentPendingOrder = pendingOrderCheckout || getSavedPendingOrder();
       pendingPurchase = null;
-      try { sessionStorage.removeItem('pendingPurchase'); } catch (e) {}
+      pendingOrderCheckout = null;
+      try {
+        sessionStorage.removeItem('pendingPurchase');
+        sessionStorage.removeItem('pendingOrderCheckout');
+      } catch (e) {}
 
       setTimeout(() => {
         closeAuthModal();
-        if (currentPending) {
-          executeCheckout(currentPending);
+        if (currentPendingPurchase) {
+          // Automatically continue to the Delivery Details screen with preserved product, size & price
+          openCheckoutModal(currentPendingPurchase);
+        } else if (currentPendingOrder) {
+          restorePendingOrderDetails(currentPendingOrder, email);
+          executeOrderPayment(currentPendingOrder);
         }
       }, 700);
     }, 450);

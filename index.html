@@ -658,39 +658,34 @@
             </div>
 
             <!-- 5. Area / Locality -->
-            <div class="checkout-field full" id="wrap-deliveryArea">
+            <div class="checkout-field" id="wrap-deliveryArea">
               <label for="deliveryArea">Area *</label>
               <input type="text" id="deliveryArea" name="area" placeholder="Enter your area">
               <div class="field-error-msg" id="err-deliveryArea">Area is required.</div>
             </div>
 
-            <!-- Researched Logistics Route Card (shown when valid location is selected) -->
-            <div class="checkout-logistics-card full" id="checkoutLogisticsCard" style="display: none;">
-              <div class="logistics-card-origin">
-                <span class="logistics-origin-dot"></span>
-                <span>From: <strong>Hyderabad Hub</strong></span>
-              </div>
-              <div class="logistics-card-metrics">
-                <span id="logisticsDistance">~1,420 km</span>
-                <span class="metric-divider">•</span>
-                <span id="logisticsTransit">Transit: 2–3 days</span>
-                <span class="metric-divider">•</span>
-                <span>Delivery: <strong id="logisticsRange" style="color: var(--espresso);">3–5 business days</strong></span>
-              </div>
+            <!-- 6. Email Address -->
+            <div class="checkout-field" id="wrap-deliveryEmail">
+              <label for="deliveryEmail">Email Address *</label>
+              <input type="email" id="deliveryEmail" name="email" placeholder="Enter your email address" autocomplete="email">
+              <div class="field-error-msg" id="err-deliveryEmail">Valid email address required.</div>
             </div>
 
-            <!-- 6. Full Address -->
+            <!-- 7. Full Address -->
             <div class="checkout-field full" id="wrap-deliveryAddress">
               <label for="deliveryAddress">Full Address *</label>
               <input type="text" id="deliveryAddress" name="fullAddress" placeholder="Enter your full delivery address" autocomplete="street-address">
               <div class="field-error-msg" id="err-deliveryAddress">Full address is required.</div>
             </div>
 
-            <!-- 7. Email Address -->
-            <div class="checkout-field full" id="wrap-deliveryEmail">
-              <label for="deliveryEmail">Email Address *</label>
-              <input type="email" id="deliveryEmail" name="email" placeholder="Enter your email address" autocomplete="email">
-              <div class="field-error-msg" id="err-deliveryEmail">Valid email address required.</div>
+            <!-- Delivery Estimate Reserved Slot (keeps modal height constant before & after estimate appears) -->
+            <div class="checkout-delivery-slot full" id="checkoutDeliverySlot">
+              <div class="checkout-logistics-card" id="checkoutLogisticsCard" style="display: none;">
+                <div class="logistics-card-origin">
+                  <span class="logistics-origin-dot"></span>
+                  <span>Estimated delivery: <strong id="logisticsDeliveryDate" style="color: var(--espresso);">16–18 October 2026</strong></span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -705,7 +700,7 @@
                   <circle cx="5.5" cy="18.5" r="2.5"></circle>
                   <circle cx="18.5" cy="18.5" r="2.5"></circle>
                 </svg>
-                Estimated delivery: <strong id="summaryEstimate">7–17 days</strong>
+                Estimated delivery: <strong id="summaryEstimate">16–18 October 2026</strong>
               </span>
             </div>
             <div class="checkout-summary-row">
@@ -748,10 +743,8 @@
           <p class="checkout-success-sub">Your payment was successful.</p>
 
           <div class="checkout-success-email-notice">
-            <span>We've sent your order confirmation to:</span><br>
-            <strong id="confirmEmailDisplay">customer@example.com</strong>
+            <span>Order confirmation sent to:</span> <strong id="confirmEmailDisplay">customer@example.com</strong>
           </div>
-          <p class="checkout-notice-sub">A confirmation email will be delivered to this address once backend services are connected.</p>
 
           <div class="checkout-estimate-banner">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -760,28 +753,28 @@
               <circle cx="5.5" cy="18.5" r="2.5"></circle>
               <circle cx="18.5" cy="18.5" r="2.5"></circle>
             </svg>
-            <span>Estimated delivery: <strong>7–17 days</strong></span>
+            <span>Estimated delivery: <strong id="confirmEstimate">16–18 October 2026</strong></span>
           </div>
 
           <div class="checkout-success-details">
             <div class="checkout-detail-row">
-              <span class="detail-label">Order Ref:</span>
+              <span class="detail-label">Order Ref</span>
               <span class="detail-val" id="confirmOrderId">#JF-000000</span>
             </div>
             <div class="checkout-detail-row">
-              <span class="detail-label">Product:</span>
+              <span class="detail-label">Product</span>
               <span class="detail-val" id="confirmProduct">-</span>
             </div>
             <div class="checkout-detail-row">
-              <span class="detail-label">Size:</span>
+              <span class="detail-label">Size</span>
               <span class="detail-val" id="confirmSize">-</span>
             </div>
             <div class="checkout-detail-row">
-              <span class="detail-label">Amount:</span>
+              <span class="detail-label">Amount</span>
               <span class="detail-val" id="confirmAmount">-</span>
             </div>
             <div class="checkout-detail-row">
-              <span class="detail-label">Delivery Address:</span>
+              <span class="detail-label">Delivery Address</span>
               <span class="detail-val" id="confirmAddress">-</span>
             </div>
           </div>
